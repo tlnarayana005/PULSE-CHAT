@@ -11,9 +11,23 @@ const allowedOrigins = [
   "http://127.0.0.1:5173",
 ].filter(Boolean);
 
+const isOriginAllowed = (origin) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (/^https:\/\/.*\.vercel\.app$/.test(origin)) return true;
+  if (/^http:\/\/localhost:\d+$/.test(origin)) return true;
+  return false;
+};
+
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins.length > 0 ? allowedOrigins : "*",
+    origin: (origin, callback) => {
+      if (isOriginAllowed(origin)) {
+        callback(null, true);
+      } else {
+        callback(null, false);
+      }
+    },
     credentials: true,
     methods: ["GET", "POST"],
   },

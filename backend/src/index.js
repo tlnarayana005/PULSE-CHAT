@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 
 import { connectDB } from "./lib/db.js";
 import authRoutes from "./routes/auth.route.js";
@@ -45,12 +46,20 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Serve Frontend (React/Vite)
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist")));
+// Serve Frontend (if built), otherwise provide API landing response
+const frontendDistPath = path.join(__dirname, "../frontend/dist");
+if (fs.existsSync(frontendDistPath)) {
+  app.use(express.static(frontendDistPath));
 
   app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "../frontend/dist", "index.html"));
+    res.sendFile(path.join(frontendDistPath, "index.html"));
+  });
+} else {
+  app.get("/", (req, res) => {
+    res.status(200).json({
+      message: "PulseChat API is running",
+      health: "/api/health",
+    });
   });
 }
 

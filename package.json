@@ -4,6 +4,7 @@
   "description": "A full-stack real-time chat application with Socket.IO, JWT auth, typing indicators, and emoji reactions",
   "main": "index.js",
   "scripts": {
+    "postinstall": "npm install --prefix backend",
     "build": "npm install --prefix backend",
     "start": "npm start --prefix backend",
     "dev": "concurrently \"npm run dev --prefix backend\" \"npm start --prefix frontend\"",

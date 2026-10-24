@@ -1,7 +1,8 @@
+import mongoose from "mongoose";
 import User from "../models/user.model.js";
 import Message from "../models/message.model.js";
 import cloudinary from "../lib/cloudinary.js";
-import { getReceiverSocketId, io } from "../lib/socket.js"; // Import socket functions
+import { getReceiverSocketId, io } from "../lib/socket.js";
 
 //  Get Users for Sidebar
 export const getUsersForSidebar = async (req, res) => {
@@ -14,7 +15,7 @@ export const getUsersForSidebar = async (req, res) => {
     res.status(200).json(filteredUsers);
   } catch (error) {
     console.error("Error in getUsersForSidebar:", error.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -24,17 +25,21 @@ export const getMessages = async (req, res) => {
     const { id: userToChatId } = req.params;
     const myId = req.user._id;
 
+    if (!mongoose.Types.ObjectId.isValid(userToChatId)) {
+      return res.status(400).json({ message: "Invalid user ID format" });
+    }
+
     const messages = await Message.find({
       $or: [
         { senderId: myId, receiverId: userToChatId },
         { senderId: userToChatId, receiverId: myId },
       ],
-    }).sort({ createdAt: 1 }); // Sort by oldest first
+    }).sort({ createdAt: 1 });
 
     res.status(200).json(messages);
   } catch (error) {
     console.error("Error in getMessages controller:", error.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -45,26 +50,40 @@ export const sendMessage = async (req, res) => {
     const { id: receiverId } = req.params;
     const senderId = req.user._id;
 
+    if (!mongoose.Types.ObjectId.isValid(receiverId)) {
+      return res.status(400).json({ message: "Invalid receiver ID format" });
+    }
+
+    if (receiverId === senderId.toString()) {
+      return res.status(400).json({ message: "Cannot send a message to yourself" });
+    }
+
+    const trimmedText = typeof text === "string" ? text.trim() : "";
+    if (!trimmedText && !image) {
+      return res.status(400).json({ message: "Message text or image is required" });
+    }
+
+    const receiver = await User.findById(receiverId);
+    if (!receiver) {
+      return res.status(404).json({ message: "Receiver not found" });
+    }
+
     let imageUrl = null;
     if (image) {
-      //  Upload image to Cloudinary
       const uploadResponse = await cloudinary.uploader.upload(image);
       imageUrl = uploadResponse.secure_url;
     }
 
-    //  Create and save new message
     const newMessage = new Message({
       senderId,
       receiverId,
-      text,
+      text: trimmedText || undefined,
       image: imageUrl,
     });
 
     await newMessage.save();
 
     const receiverSocketId = getReceiverSocketId(receiverId);
-
-    // Emit to receiver if they are online
     if (receiverSocketId) {
       io.to(receiverSocketId).emit("newMessage", newMessage);
     }
@@ -72,7 +91,7 @@ export const sendMessage = async (req, res) => {
     res.status(201).json(newMessage);
   } catch (error) {
     console.error("Error in sendMessage controller:", error.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 };
 
@@ -83,12 +102,31 @@ export const reactToMessage = async (req, res) => {
     const { emoji } = req.body;
     const userId = req.user._id;
 
-    const message = await Message.findById(messageId);
-    if (!message) {
-      return res.status(404).json({ error: "Message not found" });
+    if (!mongoose.Types.ObjectId.isValid(messageId)) {
+      return res.status(400).json({ message: "Invalid message ID format" });
     }
 
-    // Check if user already reacted with same emoji — toggle it off
+    if (!emoji || typeof emoji !== "string") {
+      return res.status(400).json({ message: "Valid emoji is required" });
+    }
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ message: "Message not found" });
+    }
+
+    // Verify user is a participant in this conversation
+    const isParticipant =
+      message.senderId.toString() === userId.toString() ||
+      message.receiverId.toString() === userId.toString();
+
+    if (!isParticipant) {
+      return res.status(403).json({
+        message: "Forbidden - You cannot react to messages outside your conversation",
+      });
+    }
+
+    // Toggle reaction: remove if identical exists, otherwise replace previous reaction
     const existingReactionIndex = message.reactions.findIndex(
       (r) => r.userId.toString() === userId.toString() && r.emoji === emoji
     );
@@ -96,7 +134,6 @@ export const reactToMessage = async (req, res) => {
     if (existingReactionIndex > -1) {
       message.reactions.splice(existingReactionIndex, 1);
     } else {
-      // Remove any previous reaction by this user, then add new one
       message.reactions = message.reactions.filter(
         (r) => r.userId.toString() !== userId.toString()
       );
@@ -105,7 +142,6 @@ export const reactToMessage = async (req, res) => {
 
     await message.save();
 
-    // Notify both sender and receiver of the message
     const senderSocketId = getReceiverSocketId(message.senderId.toString());
     const receiverSocketId = getReceiverSocketId(message.receiverId.toString());
 
@@ -124,6 +160,6 @@ export const reactToMessage = async (req, res) => {
     res.status(200).json({ reactions: message.reactions });
   } catch (error) {
     console.error("Error in reactToMessage controller:", error.message);
-    res.status(500).json({ error: "Internal server error" });
+    res.status(500).json({ message: "Internal server error" });
   }
 };

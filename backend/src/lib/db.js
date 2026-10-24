@@ -35,7 +35,15 @@ const seedDemoUsers = async () => {
   }
 };
 
+let mongoServerInstance = null;
+
 export const connectDB = async () => {
+  if (mongoose.connection.readyState === 1) return;
+  if (mongoose.connection.readyState === 2) {
+    await mongoose.connection.asPromise();
+    return;
+  }
+
   if (process.env.MONGODB_URL) {
     try {
       const conn = await mongoose.connect(process.env.MONGODB_URL, {
@@ -46,16 +54,34 @@ export const connectDB = async () => {
       return;
     } catch (error) {
       console.log("Local/Cloud MongoDB connection failed, starting MongoMemoryServer...");
+      try {
+        await mongoose.disconnect();
+      } catch (e) {}
     }
   }
 
   try {
-    const mongoServer = await MongoMemoryServer.create();
-    const mongoUri = mongoServer.getUri();
+    if (!mongoServerInstance) {
+      mongoServerInstance = await MongoMemoryServer.create();
+    }
+    const mongoUri = mongoServerInstance.getUri();
     const conn = await mongoose.connect(mongoUri);
     console.log(`In-Memory MongoDB connected: ${conn.connection.host}`);
     await seedDemoUsers();
   } catch (error) {
     console.log("MongoDB connection error:", error);
+  }
+};
+
+export const disconnectDB = async () => {
+  try {
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+    }
+    if (mongoServerInstance) {
+      await mongoServerInstance.stop();
+    }
+  } catch (error) {
+    console.log("Error disconnecting database:", error.message);
   }
 };
